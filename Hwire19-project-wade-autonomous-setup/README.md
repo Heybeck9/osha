@@ -11,6 +11,8 @@ WADE can take any repository and transform it according to your vision, complete
 - **Makes Comprehensive Changes**: Refactors code, adds features, changes architectures
 - **Tests & Validates**: Runs tests and validates functionality
 - **Shows Live Results**: Executes the refactored code and shows you the outcome
+- **Ensures Security**: Implements security best practices with request signing and credential management
+- **Optimizes Performance**: Reduces latency with model pre-warming, caching, and connection pooling
 
 ## ✨ Key Features
 
@@ -19,6 +21,20 @@ WADE can take any repository and transform it according to your vision, complete
 - Understands architectural patterns and requirements
 - Creates comprehensive refactoring plans
 - Self-corrects and iterates until functional
+- Routes tasks to specialized models based on content
+
+### 🔒 Security Hardening
+- HMAC-based request signing for API security
+- Secure credential storage and management
+- TLS certificate management for secure connections
+- JWT-based authentication and authorization
+- Rate limiting and protection against abuse
+
+### ⚡ Performance Optimization
+- Model pre-warming to reduce cold start latency
+- Multi-level query caching for faster responses
+- Connection pooling for network efficiency
+- Asynchronous processing for non-blocking operations
 
 ### 🔧 Code Transformation Capabilities
 - **Framework Conversion**: Flask → FastAPI, Django → FastAPI, etc.

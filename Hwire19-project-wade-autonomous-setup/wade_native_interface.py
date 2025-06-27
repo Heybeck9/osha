@@ -29,11 +29,34 @@ import sys
 sys.path.append('/workspace/wade_env')
 
 try:
+    from wade_env.security import request_signer, token_manager
+    from wade_env.security_middleware import security_middleware
+    from wade_env.performance import model_prewarmer, query_cache, connection_pool
+    from wade_env.websocket_manager import websocket_manager
+    from wade_env.error_handler import error_handler, ErrorSeverity, ErrorCategory
+    from wade_env.model_router import model_router
+    from wade_env.intel_query import intel_query
+except ImportError:
+    # Create the wade_env directory if it doesn't exist
+    os.makedirs("wade_env", exist_ok=True)
+    if not os.path.exists("wade_env/__init__.py"):
+        with open("wade_env/__init__.py", "w") as f:
+            f.write("# WADE Environment Module\n")
+    
+    # Import will be attempted again after modules are created
+
+try:
     from wade_env.settings_manager import settings_manager
     from wade_env.file_manager import file_manager
     from wade_env.model_manager import model_manager
     from wade_env.vscode_service import vscode_service
     from wade_env.terminal_service import terminal_service
+    # Import new modules
+    from wade_env.model_router import model_router
+    from wade_env.project_sync import project_sync
+    from wade_env.intel_query import intel_query
+    from wade_env.self_evolution import self_evolution
+    from wade_env.microagent_launcher import microagent_launcher
 except ImportError as e:
     print(f"Warning: Could not import WADE components: {e}")
     # Create mock objects for now
@@ -82,6 +105,12 @@ except ImportError as e:
     model_manager = MockManager()
     vscode_service = MockManager()
     terminal_service = MockManager()
+    # Mock new modules
+    model_router = MockManager()
+    project_sync = MockManager()
+    intel_query = MockManager()
+    self_evolution = MockManager()
+    microagent_launcher = MockManager()
 
 # Chat and Agent Models
 class ChatMessage(BaseModel):
@@ -164,6 +193,52 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Add security middleware
+@app.middleware("http")
+async def security_middleware_handler(request, call_next):
+    """Apply security checks to all requests"""
+    try:
+        # Skip security checks for static files and WebSockets
+        if request.url.path.startswith("/static") or request.url.path.startswith("/ws"):
+            return await call_next(request)
+        
+        # Validate request signature (if present)
+        if "X-Request-Signature" in request.headers:
+            if not security_middleware.validate_request_signature(request):
+                return JSONResponse(
+                    status_code=403,
+                    content={"error": "Invalid request signature"}
+                )
+        
+        # Apply rate limiting
+        client_ip = request.client.host
+        if not security_middleware.check_rate_limit(client_ip):
+            return JSONResponse(
+                status_code=429,
+                content={"error": "Rate limit exceeded"}
+            )
+        
+        # Process the request
+        response = await call_next(request)
+        
+        # Add security headers to response
+        for header, value in security_middleware.get_security_headers().items():
+            response.headers[header] = value
+        
+        return response
+    except Exception as e:
+        # Log the error
+        error_id = await error_handler.handle_error(e, {"path": request.url.path})
+        
+        # Return error response
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": "Internal server error",
+                "error_id": error_id
+            }
+        )
 
 class PhindCodeLlamaAgent:
     """Simulated Phind-CodeLlama conversation agent"""
@@ -551,6 +626,51 @@ Would you like me to proceed with this task?"""
 phind_agent = PhindCodeLlamaAgent()
 
 # WebSocket endpoint for real-time chat
+@app.websocket("/ws/updates")
+async def websocket_updates(websocket: WebSocket):
+    """WebSocket endpoint for real-time system updates"""
+    await websocket.accept()
+    
+    # Register with WebSocket manager
+    connection_id = await websocket_manager.connect(websocket)
+    
+    try:
+        # Send initial system state
+        await websocket.send_json({
+            "type": "system_state",
+            "timestamp": time.time(),
+            "data": {
+                "model_router": {
+                    "active_model": model_router.get_last_selected_model(),
+                    "performance": model_router.get_performance_metrics()
+                },
+                "agents": {
+                    "count": 0,  # Will be updated when microagent_launcher is implemented
+                    "status": "ready"
+                },
+                "intel": {
+                    "performance": intel_query.get_performance_metrics()
+                }
+            }
+        })
+        
+        # Keep connection alive with periodic updates
+        while True:
+            # Wait for client messages (ping/pong)
+            data = await websocket.receive_text()
+            
+            # Process client messages if needed
+            if data == "ping":
+                await websocket.send_text("pong")
+    except WebSocketDisconnect:
+        # Clean up on disconnect
+        websocket_manager.disconnect(connection_id)
+    except Exception as e:
+        # Log error
+        await error_handler.handle_error(e, {"connection_id": connection_id})
+        # Clean up
+        websocket_manager.disconnect(connection_id)
+
 @app.websocket("/ws/chat")
 async def websocket_chat(websocket: WebSocket):
     await websocket.accept()
@@ -921,6 +1041,334 @@ async def restart_vscode():
         return {"success": True, "url": vscode_service.get_server_url()}
     else:
         raise HTTPException(status_code=500, detail="Failed to restart VS Code server")
+
+# Model Router API Routes
+@app.get("/api/model-router/status")
+async def get_model_router_status():
+    """Get the status of the model router"""
+    return {
+        "enabled": model_router.is_enabled(),
+        "override_model": model_router.get_last_selected_model(),
+        "usage_stats": model_router.get_usage_stats()
+    }
+
+@app.post("/api/model-router/toggle")
+async def toggle_model_router(enabled: bool):
+    """Enable or disable the model router"""
+    model_router.set_enabled(enabled)
+    return {"success": True, "enabled": model_router.is_enabled()}
+
+@app.post("/api/model-router/override")
+async def set_model_override(model_name: Optional[str] = None):
+    """Set a model to override the automatic selection"""
+    success = model_router.set_override_model(model_name)
+    return {"success": success, "override_model": model_router.get_last_selected_model()}
+
+
+# Project Sync API Routes
+@app.get("/api/project/exports")
+async def list_project_exports():
+    """List all available project exports"""
+    exports = await project_sync.list_exports()
+    return {"exports": exports}
+
+@app.post("/api/project/export")
+async def export_project(include_chat_history: bool = True, 
+                        include_memory: bool = True,
+                        include_settings: bool = True):
+    """Export the current project"""
+    result = await project_sync.export_project(
+        include_chat_history=include_chat_history,
+        include_memory=include_memory,
+        include_settings=include_settings
+    )
+    return result
+
+@app.get("/api/project/download/{export_filename}")
+async def download_project_export(export_filename: str):
+    """Download a project export file"""
+    export_path = os.path.join(project_sync.backup_path, export_filename)
+    if not os.path.exists(export_path):
+        raise HTTPException(status_code=404, detail="Export file not found")
+    
+    return StreamingResponse(
+        io.open(export_path, "rb"),
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f"attachment; filename={export_filename}"}
+    )
+
+@app.post("/api/project/sync")
+async def sync_project_to_cloud(export_path: str, provider: str = "all"):
+    """Sync a project export to cloud storage"""
+    result = await project_sync.sync_to_cloud(export_path, provider)
+    return result
+
+
+# Intel Query API Routes
+@app.post("/api/intel-query")
+async def perform_intel_query(query: str, sources: List[str] = None, max_results: int = 20):
+    """Perform a comprehensive intelligence query"""
+    result = await intel_query.intel_query(query, sources, max_results)
+    return result
+
+@app.post("/api/dark-search")
+async def perform_dark_search(query: str, max_results: int = 10):
+    """Perform a search on dark web sources"""
+    result = await intel_query.dark_search(query, max_results)
+    return result
+
+@app.post("/api/fetch-content")
+async def fetch_content(url: str, use_tor: bool = False):
+    """Fetch content from a URL with optional Tor routing"""
+    result = await intel_query.fetch_content(url, use_tor)
+    return result
+
+@app.post("/api/intel-query/tor")
+async def toggle_tor(enabled: bool):
+    """Enable or disable Tor routing"""
+    success = intel_query.set_tor_enabled(enabled)
+    return {"success": success, "tor_enabled": intel_query.is_tor_enabled()}
+
+
+# Self Evolution API Routes
+@app.get("/api/self-evolve/status")
+async def get_evolution_status():
+    """Get the status of the self-evolution system"""
+    return {
+        "version": self_evolution.get_version(),
+        "evolution_in_progress": self_evolution.is_evolution_in_progress(),
+        "current_evolution": self_evolution.get_current_evolution()
+    }
+
+@app.post("/api/self-evolve")
+async def trigger_evolution():
+    """Trigger the evolution process"""
+    if self_evolution.is_evolution_in_progress():
+        return {"success": False, "message": "Evolution already in progress"}
+    
+    result = await self_evolution.evolve()
+    return result
+
+@app.get("/api/self-evolve/metrics")
+async def get_evolution_metrics(category: Optional[str] = None, days: Optional[int] = None):
+    """Get performance metrics"""
+    metrics = self_evolution.get_metrics(category, days)
+    return {"metrics": metrics}
+
+@app.get("/api/self-evolve/feedback")
+async def get_evolution_feedback(feedback_type: Optional[str] = None, 
+                               processed: Optional[bool] = None,
+                               days: Optional[int] = None):
+    """Get user feedback"""
+    feedback = self_evolution.get_feedback(feedback_type, processed, days)
+    return {"feedback": feedback}
+
+@app.post("/api/self-evolve/feedback")
+async def record_feedback(content: str, feedback_type: str, 
+                        context: Optional[Dict[str, Any]] = None,
+                        rating: Optional[int] = None):
+    """Record user feedback"""
+    feedback_id = self_evolution.record_feedback(content, feedback_type, context, None, rating)
+    return {"success": True, "feedback_id": feedback_id}
+
+
+# Microagent API Routes
+@app.get("/api/microagents")
+async def list_microagents(agent_type: Optional[str] = None, status: Optional[str] = None):
+    """List microagents"""
+    agents = microagent_launcher.list_agents(agent_type, status)
+    return {"agents": agents}
+
+@app.get("/api/microagents/{agent_id}")
+async def get_microagent(agent_id: str):
+    """Get information about a microagent"""
+    agent = microagent_launcher.get_agent(agent_id)
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return agent
+
+@app.post("/api/microagents/spawn")
+async def spawn_microagent(agent_type: str, 
+                         custom_name: Optional[str] = None,
+                         custom_description: Optional[str] = None):
+    """Spawn a new microagent"""
+    agent_id = await microagent_launcher.spawn_agent(
+        agent_type, 
+        custom_name, 
+        custom_description
+    )
+    if not agent_id:
+        raise HTTPException(status_code=400, detail="Failed to spawn agent")
+    return {"agent_id": agent_id}
+
+@app.post("/api/microagents/{agent_id}/terminate")
+async def terminate_microagent(agent_id: str):
+    """Terminate a microagent"""
+    success = await microagent_launcher.terminate_agent(agent_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return {"success": success}
+
+@app.get("/api/microagent-tasks")
+async def list_microagent_tasks(agent_id: Optional[str] = None, 
+                              status: Optional[str] = None):
+    """List microagent tasks"""
+    tasks = microagent_launcher.list_tasks(agent_id, status)
+    return {"tasks": tasks}
+
+@app.get("/api/microagent-tasks/{task_id}")
+async def get_microagent_task(task_id: str):
+    """Get information about a microagent task"""
+    task = microagent_launcher.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return task
+
+@app.post("/api/microagent-tasks")
+async def create_microagent_task(description: str,
+                               agent_type: Optional[str] = None,
+                               agent_id: Optional[str] = None,
+                               execution_mode: Optional[str] = None,
+                               priority: int = 3):
+    """Create a new microagent task"""
+    task_id = await microagent_launcher.create_task(
+        description,
+        agent_type,
+        agent_id,
+        execution_mode,
+        priority
+    )
+    if not task_id:
+        raise HTTPException(status_code=400, detail="Failed to create task")
+    return {"task_id": task_id}
+
+@app.post("/api/microagent-tasks/{task_id}/cancel")
+async def cancel_microagent_task(task_id: str):
+    """Cancel a microagent task"""
+    success = await microagent_launcher.cancel_task(task_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Task not found or cannot be cancelled")
+    return {"success": success}
+
+@app.post("/api/microagent/process-message")
+async def process_message_with_microagent(message: str, user_id: str = "user"):
+    """Process a message with microagent system"""
+    response = await microagent_launcher.process_message(message, user_id)
+    return response
+
+# Security API endpoints
+@app.post("/api/auth/token")
+async def generate_auth_token(user_data: dict):
+    """Generate an authentication token"""
+    user_id = user_data.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=400, detail="Missing user_id")
+    
+    # Generate token
+    token = token_manager.generate_token(user_id)
+    
+    return {
+        "token": token,
+        "expires_in": 86400,  # 24 hours
+        "token_type": "Bearer"
+    }
+
+@app.get("/api/security/status")
+async def get_security_status():
+    """Get security system status"""
+    return {
+        "active_connections": websocket_manager.get_connection_count(),
+        "rate_limits": {
+            "max_requests": security_middleware.rate_limit_max_requests,
+            "window_seconds": security_middleware.rate_limit_window
+        },
+        "blocked_ips_count": len(security_middleware.blocked_ips)
+    }
+
+# Model Router API endpoints
+@app.get("/api/models/status")
+async def get_model_status():
+    """Get model router status"""
+    return {
+        "active_model": model_router.get_last_selected_model(),
+        "usage_stats": model_router.get_usage_stats(),
+        "performance": model_router.get_performance_metrics()
+    }
+
+@app.post("/api/models/warmup")
+async def warmup_models():
+    """Warm up all models"""
+    results = await model_router.warmup_all_models()
+    return {
+        "success": True,
+        "results": results
+    }
+
+@app.post("/api/models/set-override")
+async def set_model_override(data: dict):
+    """Set model override"""
+    model_name = data.get("model")
+    success = model_router.set_override_model(model_name)
+    return {
+        "success": success,
+        "active_model": model_router.get_last_selected_model()
+    }
+
+# Intel Query API endpoints
+@app.post("/api/intel-query")
+async def execute_intel_query(query_data: dict):
+    """Execute an intelligence query"""
+    query = query_data.get("query")
+    if not query:
+        raise HTTPException(status_code=400, detail="Missing query")
+    
+    search_type = query_data.get("type", "general")
+    safe_search = query_data.get("safe_search", True)
+    bypass_cache = query_data.get("bypass_cache", False)
+    
+    try:
+        results = await intel_query.search(
+            query=query,
+            search_type=search_type,
+            safe_search=safe_search,
+            bypass_cache=bypass_cache
+        )
+        return results
+    except Exception as e:
+        error_id = await error_handler.handle_error(e, {"query": query})
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error executing query: {str(e)} (Error ID: {error_id})"
+        )
+
+@app.get("/api/intel/performance")
+async def get_intel_performance():
+    """Get intel query performance metrics"""
+    return {
+        "metrics": intel_query.get_performance_metrics()
+    }
+
+# Error handling API endpoints
+@app.get("/api/errors")
+async def get_errors(limit: int = 10, severity: Optional[str] = None):
+    """Get error log"""
+    severity_enum = None
+    if severity:
+        try:
+            severity_enum = ErrorSeverity[severity.upper()]
+        except KeyError:
+            raise HTTPException(status_code=400, detail=f"Invalid severity: {severity}")
+    
+    errors = error_handler.get_error_log(limit=limit, severity=severity_enum)
+    return {
+        "errors": errors,
+        "total": len(errors)
+    }
+
+@app.get("/api/errors/stats")
+async def get_error_stats():
+    """Get error statistics"""
+    return error_handler.get_error_stats()
 
 # Serve the native interface
 @app.get("/", response_class=HTMLResponse)
@@ -1784,6 +2232,10 @@ async def serve_native_interface():
                 <button class="nav-tab" data-tab="files">📁 Files</button>
                 <button class="nav-tab" data-tab="settings">⚙️ Settings</button>
                 <button class="nav-tab" data-tab="models">🧠 Models</button>
+                <button class="nav-tab" data-tab="agents">🤖 Agents</button>
+                <button class="nav-tab" data-tab="intel">🔍 Intel</button>
+                <button class="nav-tab" data-tab="project">📦 Project</button>
+                <button class="nav-tab" data-tab="evolution">🧬 Evolution</button>
             </div>
             <div class="header-right">
                 <div class="execution-mode-toggle">
@@ -1910,6 +2362,199 @@ async def serve_native_interface():
                     </div>
                 </div>
             </div>
+
+            <!-- Agents Panel -->
+            <div class="panel agents-panel" id="agentsPanel" style="display: none;">
+                <div class="panel-header">
+                    <h2>🤖 Microagent Management</h2>
+                    <button class="btn-primary" onclick="createAgent()">➕ New Agent</button>
+                </div>
+
+                <div class="panel-content">
+                    <div class="section">
+                        <h3>Active Agents</h3>
+                        <div class="agent-list" id="agentList">
+                            <div class="empty-state">No active agents</div>
+                        </div>
+                    </div>
+
+                    <div class="section">
+                        <h3>Agent Templates</h3>
+                        <div class="template-list">
+                            <div class="template-item">
+                                <span class="template-name">Code Reviewer</span>
+                                <button class="btn-sm" onclick="spawnAgent('code-reviewer')">Spawn</button>
+                            </div>
+                            <div class="template-item">
+                                <span class="template-name">Data Analyzer</span>
+                                <button class="btn-sm" onclick="spawnAgent('data-analyzer')">Spawn</button>
+                            </div>
+                            <div class="template-item">
+                                <span class="template-name">Security Auditor</span>
+                                <button class="btn-sm" onclick="spawnAgent('security-auditor')">Spawn</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Intel Panel -->
+            <div class="panel intel-panel" id="intelPanel" style="display: none;">
+                <div class="panel-header">
+                    <h2>🔍 Intelligence Gathering</h2>
+                </div>
+
+                <div class="panel-content">
+                    <div class="section">
+                        <h3>Search Options</h3>
+                        <div class="search-options">
+                            <div class="option-group">
+                                <label>Search Type:</label>
+                                <select id="searchType">
+                                    <option value="standard">Standard</option>
+                                    <option value="dark">Dark Web (Tor)</option>
+                                    <option value="academic">Academic</option>
+                                </select>
+                            </div>
+                            <div class="option-group">
+                                <label>Anonymity Level:</label>
+                                <select id="anonymityLevel">
+                                    <option value="none">None</option>
+                                    <option value="basic">Basic</option>
+                                    <option value="max">Maximum</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="section">
+                        <h3>Intel Query</h3>
+                        <div class="search-form">
+                            <textarea id="intelQuery" placeholder="Enter your search query..."></textarea>
+                            <button class="btn-primary" onclick="executeIntelQuery()">🔍 Search</button>
+                        </div>
+                    </div>
+
+                    <div class="section">
+                        <h3>Results</h3>
+                        <div class="results-container" id="intelResults">
+                            <div class="empty-state">No results yet</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Project Panel -->
+            <div class="panel project-panel" id="projectPanel" style="display: none;">
+                <div class="panel-header">
+                    <h2>📦 Project Management</h2>
+                </div>
+
+                <div class="panel-content">
+                    <div class="section">
+                        <h3>Project Export</h3>
+                        <div class="export-options">
+                            <div class="option-group">
+                                <label>Export Format:</label>
+                                <select id="exportFormat">
+                                    <option value="zip">ZIP Archive</option>
+                                    <option value="tar">TAR Archive</option>
+                                    <option value="json">JSON Bundle</option>
+                                </select>
+                            </div>
+                            <div class="option-group">
+                                <label>Include:</label>
+                                <div class="checkbox-group">
+                                    <input type="checkbox" id="includeChat" checked>
+                                    <label for="includeChat">Chat History</label>
+                                </div>
+                                <div class="checkbox-group">
+                                    <input type="checkbox" id="includeFiles" checked>
+                                    <label for="includeFiles">Project Files</label>
+                                </div>
+                                <div class="checkbox-group">
+                                    <input type="checkbox" id="includeMemory" checked>
+                                    <label for="includeMemory">Memory Logs</label>
+                                </div>
+                            </div>
+                            <button class="btn-primary" onclick="exportProject()">📦 Export Project</button>
+                        </div>
+                    </div>
+
+                    <div class="section">
+                        <h3>Cloud Sync</h3>
+                        <div class="cloud-options">
+                            <div class="option-group">
+                                <label>Cloud Provider:</label>
+                                <select id="cloudProvider">
+                                    <option value="gdrive">Google Drive</option>
+                                    <option value="dropbox">Dropbox</option>
+                                    <option value="s3">Amazon S3</option>
+                                </select>
+                            </div>
+                            <button class="btn-primary" onclick="syncToCloud()">☁️ Sync to Cloud</button>
+                        </div>
+                        <div class="sync-status" id="syncStatus">
+                            <div class="empty-state">Not synced yet</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Evolution Panel -->
+            <div class="panel evolution-panel" id="evolutionPanel" style="display: none;">
+                <div class="panel-header">
+                    <h2>🧬 System Evolution</h2>
+                </div>
+
+                <div class="panel-content">
+                    <div class="section">
+                        <h3>Evolution Status</h3>
+                        <div class="evolution-status">
+                            <div class="status-item">
+                                <span class="status-label">Current Version:</span>
+                                <span class="status-value" id="currentVersion">1.0.0</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="status-label">Last Evolution:</span>
+                                <span class="status-value" id="lastEvolution">Never</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="status-label">Evolution Score:</span>
+                                <span class="status-value" id="evolutionScore">0</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="section">
+                        <h3>Trigger Evolution</h3>
+                        <div class="evolution-options">
+                            <div class="option-group">
+                                <label>Evolution Target:</label>
+                                <select id="evolutionTarget">
+                                    <option value="all">All Systems</option>
+                                    <option value="reasoning">Reasoning Engine</option>
+                                    <option value="code">Code Generation</option>
+                                    <option value="memory">Memory System</option>
+                                </select>
+                            </div>
+                            <div class="option-group">
+                                <label>Evolution Intensity:</label>
+                                <input type="range" id="evolutionIntensity" min="1" max="10" value="5">
+                                <span id="intensityValue">5</span>
+                            </div>
+                            <button class="btn-primary" onclick="triggerEvolution()">🧬 Evolve System</button>
+                        </div>
+                    </div>
+
+                    <div class="section">
+                        <h3>Evolution History</h3>
+                        <div class="evolution-history" id="evolutionHistory">
+                            <div class="empty-state">No evolution history</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         
         <!-- Right Panel - Workspace -->
         <div class="workspace-panel">
@@ -2018,6 +2663,10 @@ async def serve_native_interface():
             document.getElementById('filesPanel').style.display = 'none';
             document.getElementById('settingsPanel').style.display = 'none';
             document.getElementById('modelsPanel').style.display = 'none';
+            document.getElementById('agentsPanel').style.display = 'none';
+            document.getElementById('intelPanel').style.display = 'none';
+            document.getElementById('projectPanel').style.display = 'none';
+            document.getElementById('evolutionPanel').style.display = 'none';
             
             // Remove active class from all nav tabs
             document.querySelectorAll('.nav-tab').forEach(tab => {
@@ -2713,6 +3362,289 @@ async def serve_native_interface():
                     }
                 });
         }, 1000);
+        
+        // Microagent Management Functions
+        function createAgent() {
+            const agentName = prompt("Enter agent name:");
+            if (!agentName) return;
+            
+            fetch('/api/agents/create', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: agentName })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    updateAgentList();
+                    addSystemMessage(`Agent "${agentName}" created successfully`);
+                } else {
+                    addSystemMessage(`Failed to create agent: ${data.error}`);
+                }
+            });
+        }
+        
+        function spawnAgent(templateId) {
+            fetch('/api/agents/spawn', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ template: templateId })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    updateAgentList();
+                    addSystemMessage(`Agent spawned from template "${templateId}"`);
+                } else {
+                    addSystemMessage(`Failed to spawn agent: ${data.error}`);
+                }
+            });
+        }
+        
+        function updateAgentList() {
+            fetch('/api/agents/list')
+            .then(response => response.json())
+            .then(data => {
+                const agentList = document.getElementById('agentList');
+                if (data.agents && data.agents.length > 0) {
+                    agentList.innerHTML = data.agents.map(agent => `
+                        <div class="agent-item">
+                            <div class="agent-info">
+                                <span class="agent-name">${agent.name}</span>
+                                <span class="agent-status">${agent.status}</span>
+                            </div>
+                            <div class="agent-actions">
+                                <button class="btn-sm" onclick="terminateAgent('${agent.id}')">Terminate</button>
+                            </div>
+                        </div>
+                    `).join('');
+                } else {
+                    agentList.innerHTML = '<div class="empty-state">No active agents</div>';
+                }
+            });
+        }
+        
+        function terminateAgent(agentId) {
+            fetch(`/api/agents/terminate/${agentId}`, { method: 'POST' })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    updateAgentList();
+                    addSystemMessage(`Agent terminated successfully`);
+                } else {
+                    addSystemMessage(`Failed to terminate agent: ${data.error}`);
+                }
+            });
+        }
+        
+        // Intel Query Functions
+        function executeIntelQuery() {
+            const query = document.getElementById('intelQuery').value;
+            const searchType = document.getElementById('searchType').value;
+            const anonymityLevel = document.getElementById('anonymityLevel').value;
+            
+            if (!query) {
+                alert("Please enter a search query");
+                return;
+            }
+            
+            document.getElementById('intelResults').innerHTML = '<div class="loading">Searching...</div>';
+            
+            fetch('/api/intel-query', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    query: query,
+                    type: searchType,
+                    anonymity: anonymityLevel
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.results) {
+                    displayIntelResults(data.results);
+                } else {
+                    document.getElementById('intelResults').innerHTML = 
+                        '<div class="empty-state">No results found</div>';
+                }
+            })
+            .catch(error => {
+                document.getElementById('intelResults').innerHTML = 
+                    `<div class="error-state">Error: ${error.message}</div>`;
+            });
+        }
+        
+        function displayIntelResults(results) {
+            const resultsContainer = document.getElementById('intelResults');
+            
+            if (results.length === 0) {
+                resultsContainer.innerHTML = '<div class="empty-state">No results found</div>';
+                return;
+            }
+            
+            resultsContainer.innerHTML = results.map(result => `
+                <div class="result-item">
+                    <div class="result-header">
+                        <span class="result-source">${result.source}</span>
+                        <span class="result-date">${new Date(result.timestamp).toLocaleString()}</span>
+                    </div>
+                    <div class="result-content">${result.content}</div>
+                    <div class="result-meta">
+                        <span class="result-confidence">Confidence: ${result.confidence || 'N/A'}</span>
+                        <span class="result-tags">${(result.tags || []).join(', ')}</span>
+                    </div>
+                </div>
+            `).join('');
+        }
+        
+        // Project Management Functions
+        function exportProject() {
+            const format = document.getElementById('exportFormat').value;
+            const includeChat = document.getElementById('includeChat').checked;
+            const includeFiles = document.getElementById('includeFiles').checked;
+            const includeMemory = document.getElementById('includeMemory').checked;
+            
+            fetch('/api/project/export', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    format: format,
+                    include: {
+                        chat: includeChat,
+                        files: includeFiles,
+                        memory: includeMemory
+                    }
+                })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Export failed');
+                }
+                return response.blob();
+            })
+            .then(blob => {
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `wade-project.${format}`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+                addSystemMessage(`Project exported successfully as ${format}`);
+            })
+            .catch(error => {
+                addSystemMessage(`Export failed: ${error.message}`);
+            });
+        }
+        
+        function syncToCloud() {
+            const provider = document.getElementById('cloudProvider').value;
+            const syncStatus = document.getElementById('syncStatus');
+            
+            syncStatus.innerHTML = '<div class="loading">Syncing to cloud...</div>';
+            
+            fetch('/api/project/sync', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ provider: provider })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    syncStatus.innerHTML = `
+                        <div class="success-state">
+                            <p>Synced successfully to ${provider}</p>
+                            <p>Last sync: ${new Date().toLocaleString()}</p>
+                        </div>
+                    `;
+                    addSystemMessage(`Project synced to ${provider}`);
+                } else {
+                    syncStatus.innerHTML = `
+                        <div class="error-state">
+                            <p>Sync failed: ${data.error}</p>
+                        </div>
+                    `;
+                }
+            })
+            .catch(error => {
+                syncStatus.innerHTML = `
+                    <div class="error-state">
+                        <p>Sync error: ${error.message}</p>
+                    </div>
+                `;
+            });
+        }
+        
+        // Evolution Functions
+        function triggerEvolution() {
+            const target = document.getElementById('evolutionTarget').value;
+            const intensity = document.getElementById('evolutionIntensity').value;
+            
+            fetch('/api/self-evolve', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    target: target,
+                    intensity: parseInt(intensity)
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    addSystemMessage(`Evolution process started for ${target}`);
+                    updateEvolutionStatus();
+                } else {
+                    addSystemMessage(`Evolution failed: ${data.error}`);
+                }
+            })
+            .catch(error => {
+                addSystemMessage(`Evolution error: ${error.message}`);
+            });
+        }
+        
+        function updateEvolutionStatus() {
+            fetch('/api/evolution/status')
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('currentVersion').textContent = data.version;
+                document.getElementById('lastEvolution').textContent = 
+                    data.last_evolution ? new Date(data.last_evolution).toLocaleString() : 'Never';
+                document.getElementById('evolutionScore').textContent = data.score;
+                
+                updateEvolutionHistory(data.history || []);
+            });
+        }
+        
+        function updateEvolutionHistory(history) {
+            const historyContainer = document.getElementById('evolutionHistory');
+            
+            if (history.length === 0) {
+                historyContainer.innerHTML = '<div class="empty-state">No evolution history</div>';
+                return;
+            }
+            
+            historyContainer.innerHTML = history.map(entry => `
+                <div class="history-item">
+                    <div class="history-header">
+                        <span class="history-version">v${entry.version}</span>
+                        <span class="history-date">${new Date(entry.timestamp).toLocaleString()}</span>
+                    </div>
+                    <div class="history-changes">
+                        <p>${entry.changes}</p>
+                    </div>
+                    <div class="history-metrics">
+                        <span class="metric">Score: ${entry.score}</span>
+                        <span class="metric">Target: ${entry.target}</span>
+                    </div>
+                </div>
+            `).join('');
+        }
+        
+        // Initialize intensity value display
+        document.getElementById('evolutionIntensity')?.addEventListener('input', function() {
+            document.getElementById('intensityValue').textContent = this.value;
+        });
     </script>
 </body>
 </html>
