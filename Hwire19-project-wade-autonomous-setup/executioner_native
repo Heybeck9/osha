@@ -1,0 +1,298 @@
+#!/bin/bash
+
+# WADE Native Interface Executioner
+# OpenHands-style autonomous development environment
+
+cat << 'EOF'
+██╗    ██╗ █████╗ ██████╗ ███████╗    ███╗   ██╗ █████╗ ████████╗██╗██╗   ██╗███████╗
+██║    ██║██╔══██╗██╔══██╗██╔════╝    ████╗  ██║██╔══██╗╚══██╔══╝██║██║   ██║██╔════╝
+██║ █╗ ██║███████║██║  ██║█████╗      ██╔██╗ ██║███████║   ██║   ██║██║   ██║█████╗  
+██║███╗██║██╔══██║██║  ██║██╔══╝      ██║╚██╗██║██╔══██║   ██║   ██║╚██╗ ██╔╝██╔══╝  
+╚███╔███╔╝██║  ██║██████╔╝███████╗    ██║ ╚████║██║  ██║   ██║   ██║ ╚████╔╝ ███████╗
+ ╚══╝╚══╝ ╚═╝  ╚═╝╚═════╝ ╚══════╝    ╚═╝  ╚═══╝╚═╝  ╚═╝   ╚═╝   ╚═╝  ╚═══╝  ╚══════╝
+
+    🤖 Autonomous Development Environment 🤖
+    OpenHands-Style Interface with Embedded Tools
+EOF
+
+echo ""
+echo "🚀 Initializing WADE Native Interface..."
+echo "📁 Setting up autonomous development environment..."
+
+# Create WADE environment
+WADE_ENV="/workspace/wade_env"
+mkdir -p "$WADE_ENV"
+cd "$WADE_ENV"
+
+echo "📦 Setting up Python virtual environment..."
+
+# Create virtual environment if it doesn't exist
+if [ ! -d "venv" ]; then
+    python3 -m venv venv
+fi
+
+# Activate virtual environment
+source venv/bin/activate
+
+echo "📥 Installing dependencies..."
+
+# Install core dependencies
+pip install --quiet --upgrade pip
+pip install --quiet fastapi uvicorn python-multipart jinja2 aiofiles websockets
+
+# Install additional tools for autonomous development
+pip install --quiet requests beautifulsoup4 gitpython python-dotenv
+
+echo "🔧 Setting up development tools..."
+
+# Install code-server (VS Code in browser) if not already installed
+if ! command -v code-server &> /dev/null; then
+    echo "📝 Installing VS Code Server..."
+    curl -fsSL https://code-server.dev/install.sh | sh > /dev/null 2>&1
+fi
+
+# Create demo workspace
+mkdir -p demo_workspace
+cd demo_workspace
+
+# Create a sample project structure
+cat > app.py << 'PYEOF'
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+from typing import List, Optional
+import uvicorn
+
+app = FastAPI(title="WADE Demo API", description="Autonomous development demo")
+
+class Item(BaseModel):
+    name: str
+    description: Optional[str] = None
+    price: float
+    tax: Optional[float] = None
+
+items_db = []
+
+@app.get("/")
+async def root():
+    return {"message": "WADE Autonomous Development Demo", "items_count": len(items_db)}
+
+@app.get("/items", response_model=List[Item])
+async def get_items():
+    return items_db
+
+@app.post("/items", response_model=Item)
+async def create_item(item: Item):
+    items_db.append(item)
+    return item
+
+@app.get("/items/{item_id}")
+async def get_item(item_id: int):
+    if item_id >= len(items_db):
+        raise HTTPException(status_code=404, detail="Item not found")
+    return items_db[item_id]
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+PYEOF
+
+# Create requirements.txt
+cat > requirements.txt << 'EOF'
+fastapi==0.104.1
+uvicorn==0.24.0
+pydantic==2.5.0
+python-multipart==0.0.6
+EOF
+
+# Create a simple HTML frontend
+mkdir -p static
+cat > static/index.html << 'HTMLEOF'
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WADE Demo App</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; }
+        h1 { color: #333; text-align: center; }
+        .status { padding: 20px; background: #e8f5e8; border-radius: 5px; margin: 20px 0; }
+        .demo-section { margin: 20px 0; padding: 20px; border: 1px solid #ddd; border-radius: 5px; }
+        button { background: #007cba; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; }
+        button:hover { background: #005a87; }
+        input, textarea { width: 100%; padding: 10px; margin: 5px 0; border: 1px solid #ddd; border-radius: 3px; }
+        .item { background: #f9f9f9; padding: 10px; margin: 5px 0; border-radius: 3px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🤖 WADE Autonomous Development Demo</h1>
+        
+        <div class="status">
+            <h3>✅ System Status</h3>
+            <p>WADE Native Interface is running successfully!</p>
+            <p>This demo application was created autonomously by WADE.</p>
+        </div>
+        
+        <div class="demo-section">
+            <h3>📝 Add New Item</h3>
+            <input type="text" id="itemName" placeholder="Item name">
+            <input type="text" id="itemDesc" placeholder="Description">
+            <input type="number" id="itemPrice" placeholder="Price" step="0.01">
+            <button onclick="addItem()">Add Item</button>
+        </div>
+        
+        <div class="demo-section">
+            <h3>📋 Items List</h3>
+            <div id="itemsList">Loading...</div>
+            <button onclick="loadItems()">Refresh Items</button>
+        </div>
+    </div>
+
+    <script>
+        async function addItem() {
+            const name = document.getElementById('itemName').value;
+            const description = document.getElementById('itemDesc').value;
+            const price = parseFloat(document.getElementById('itemPrice').value);
+            
+            if (!name || !price) {
+                alert('Please fill in name and price');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/items', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, description, price })
+                });
+                
+                if (response.ok) {
+                    document.getElementById('itemName').value = '';
+                    document.getElementById('itemDesc').value = '';
+                    document.getElementById('itemPrice').value = '';
+                    loadItems();
+                } else {
+                    alert('Error adding item');
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+        
+        async function loadItems() {
+            try {
+                const response = await fetch('/items');
+                const items = await response.json();
+                
+                const itemsList = document.getElementById('itemsList');
+                if (items.length === 0) {
+                    itemsList.innerHTML = '<p>No items yet. Add some items above!</p>';
+                } else {
+                    itemsList.innerHTML = items.map((item, index) => `
+                        <div class="item">
+                            <strong>${item.name}</strong> - $${item.price}
+                            ${item.description ? `<br><em>${item.description}</em>` : ''}
+                        </div>
+                    `).join('');
+                }
+            } catch (error) {
+                document.getElementById('itemsList').innerHTML = '<p>Error loading items</p>';
+            }
+        }
+        
+        // Load items on page load
+        loadItems();
+    </script>
+</body>
+</html>
+HTMLEOF
+
+# Update FastAPI app to serve static files
+cat > app.py << 'PYEOF'
+from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
+from typing import List, Optional
+import uvicorn
+
+app = FastAPI(title="WADE Demo API", description="Autonomous development demo")
+
+# Mount static files
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+class Item(BaseModel):
+    name: str
+    description: Optional[str] = None
+    price: float
+    tax: Optional[float] = None
+
+items_db = []
+
+@app.get("/")
+async def root():
+    return FileResponse('static/index.html')
+
+@app.get("/api/status")
+async def status():
+    return {"message": "WADE Autonomous Development Demo", "items_count": len(items_db)}
+
+@app.get("/items", response_model=List[Item])
+async def get_items():
+    return items_db
+
+@app.post("/items", response_model=Item)
+async def create_item(item: Item):
+    items_db.append(item)
+    return item
+
+@app.get("/items/{item_id}")
+async def get_item(item_id: int):
+    if item_id >= len(items_db):
+        raise HTTPException(status_code=404, detail="Item not found")
+    return items_db[item_id]
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+PYEOF
+
+cd ..
+
+echo "🎉 WADE NATIVE INTERFACE READY! 🎉"
+echo ""
+echo "✅ Virtual environment activated"
+echo "✅ Dependencies installed" 
+echo "✅ Demo workspace created"
+echo "✅ VS Code server available"
+echo "✅ WADE native interface configured"
+echo ""
+
+# Start VS Code server in background
+echo "📝 Starting VS Code Server..."
+code-server --bind-addr 0.0.0.0:60001 --auth none demo_workspace > /tmp/code-server.log 2>&1 &
+CODE_SERVER_PID=$!
+
+# Wait a moment for code-server to start
+sleep 3
+
+echo "🚀 STARTING WADE NATIVE INTERFACE..."
+echo ""
+echo "🌐 Access Points:"
+echo "📍 WADE Interface: https://work-1-bgqqisslappxddir.prod-runtime.all-hands.dev"
+echo "📝 VS Code Editor: https://work-2-bgqqisslappxddir.prod-runtime.all-hands.dev"
+echo "🔧 Demo Application: http://localhost:8000"
+echo ""
+echo "💬 Features:"
+echo "• Chat-driven development with Phind-CodeLlama"
+echo "• Autonomous micro-agent creation"
+echo "• Embedded VS Code editor"
+echo "• Live application preview"
+echo "• Real-time terminal integration"
+echo "• Adaptive task execution"
+echo ""
+
+# Start the WADE native interface
+echo "🤖 Starting WADE Native Interface Server..."
+python3 /workspace/wade_native_interface.py
+
+# Cleanup on exit
+trap "kill $CODE_SERVER_PID 2>/dev/null" EXIT

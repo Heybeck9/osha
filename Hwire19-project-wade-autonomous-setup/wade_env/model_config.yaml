@@ -1,0 +1,61 @@
+active_model: phind-codellama
+fallback_models:
+- deepseek-coder
+- wizardlm
+- llama2
+models:
+- api_endpoint: http://localhost:11434
+  api_key: null
+  capabilities:
+  - code
+  - reasoning
+  - analysis
+  context_length: 16384
+  enabled: true
+  max_tokens: 4096
+  model_id: phind-codellama:latest
+  name: phind-codellama
+  priority: 10
+  provider: ollama
+  temperature: 0.1
+- api_endpoint: http://localhost:11434
+  api_key: null
+  capabilities:
+  - code
+  - debugging
+  - optimization
+  context_length: 8192
+  enabled: true
+  max_tokens: 2048
+  model_id: deepseek-coder:6.7b
+  name: deepseek-coder
+  priority: 8
+  provider: ollama
+  temperature: 0.2
+- api_endpoint: http://localhost:11434
+  api_key: null
+  capabilities:
+  - reasoning
+  - planning
+  - creative
+  context_length: 4096
+  enabled: true
+  max_tokens: 2048
+  model_id: wizardlm:7b
+  name: wizardlm
+  priority: 6
+  provider: ollama
+  temperature: 0.7
+- api_endpoint: http://localhost:11434
+  api_key: null
+  capabilities:
+  - general
+  - conversation
+  context_length: 4096
+  enabled: true
+  max_tokens: 2048
+  model_id: llama2:7b
+  name: llama2
+  priority: 4
+  provider: ollama
+  temperature: 0.7

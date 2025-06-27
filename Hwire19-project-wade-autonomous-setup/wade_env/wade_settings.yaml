@@ -1,0 +1,76 @@
+autonomy:
+  auto_tune_prompt_chains: true
+  autonomy_mode: false
+  enable_mutation: true
+  execution_frequency: 60
+  learning_rate: 0.1
+  max_autonomous_runs: 5
+  success_threshold: 0.8
+execution:
+  allow_payload_write: false
+  confirm_before_live: true
+  execution_mode: simulation
+  execution_timeout: 300
+  max_chains_in_sandbox: 10
+  require_root_for_live: true
+last_updated: '2025-06-27T00:21:58.142228'
+memory:
+  auto_cleanup: true
+  backup_frequency: 24
+  max_memory_size_mb: 1000
+  memory_path: /workspace/wade_env/memory
+  retain_history_days: 30
+  score_display_mode: normalized
+model:
+  default_reasoning_model: phind-codellama
+  fallback_models:
+  - deepseek-coder
+  - wizardlm
+  model_router_strategy: auto
+  prompt_style_bias: logic
+  temperature: 0.1
+  token_limit_per_chain: 4096
+network:
+  default_interface: eth0
+  enable_tor_routing: false
+  max_concurrent_requests: 5
+  request_delay: 1.0
+  search_sources:
+  - google
+  - github
+  use_proxychains: false
+  user_agent: WADE/1.0
+security:
+  allowed_file_types:
+  - .py
+  - .sh
+  - .txt
+  - .json
+  - .yaml
+  execution_audit_logging: true
+  kill_switch_keybind: Ctrl+Alt+Esc
+  live_mode_password: ''
+  max_file_size_mb: 100
+  panic_button_enabled: true
+  password_required_for_live: false
+  require_root_for_live: true
+system:
+  default_startup_agents:
+  - Planner
+  - Executor
+  - Memory
+  enable_cli_hooks: true
+  local_model_path: /workspace/wade_env/models
+  log_level: INFO
+  run_at_boot: false
+  whisper_voice_input: false
+  workspace_path: /workspace/wade_env
+ui:
+  auto_save_interval: 30
+  max_chat_history: 1000
+  show_chat_history: true
+  show_persistent_memory: true
+  show_project_files: true
+  terminal_font_size: 14
+  theme: dark
+version: 1.0.0
