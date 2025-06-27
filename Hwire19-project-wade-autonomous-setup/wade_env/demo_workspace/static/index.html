@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WADE Demo App</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; background: #f5f5f5; }
+        .container { max-width: 800px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px; }
+        h1 { color: #333; text-align: center; }
+        .status { padding: 20px; background: #e8f5e8; border-radius: 5px; margin: 20px 0; }
+        .demo-section { margin: 20px 0; padding: 20px; border: 1px solid #ddd; border-radius: 5px; }
+        button { background: #007cba; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; }
+        button:hover { background: #005a87; }
+        input, textarea { width: 100%; padding: 10px; margin: 5px 0; border: 1px solid #ddd; border-radius: 3px; }
+        .item { background: #f9f9f9; padding: 10px; margin: 5px 0; border-radius: 3px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🤖 WADE Autonomous Development Demo</h1>
+        
+        <div class="status">
+            <h3>✅ System Status</h3>
+            <p>WADE Native Interface is running successfully!</p>
+            <p>This demo application was created autonomously by WADE.</p>
+        </div>
+        
+        <div class="demo-section">
+            <h3>📝 Add New Item</h3>
+            <input type="text" id="itemName" placeholder="Item name">
+            <input type="text" id="itemDesc" placeholder="Description">
+            <input type="number" id="itemPrice" placeholder="Price" step="0.01">
+            <button onclick="addItem()">Add Item</button>
+        </div>
+        
+        <div class="demo-section">
+            <h3>📋 Items List</h3>
+            <div id="itemsList">Loading...</div>
+            <button onclick="loadItems()">Refresh Items</button>
+        </div>
+    </div>
+
+    <script>
+        async function addItem() {
+            const name = document.getElementById('itemName').value;
+            const description = document.getElementById('itemDesc').value;
+            const price = parseFloat(document.getElementById('itemPrice').value);
+            
+            if (!name || !price) {
+                alert('Please fill in name and price');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/items', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, description, price })
+                });
+                
+                if (response.ok) {
+                    document.getElementById('itemName').value = '';
+                    document.getElementById('itemDesc').value = '';
+                    document.getElementById('itemPrice').value = '';
+                    loadItems();
+                } else {
+                    alert('Error adding item');
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+        
+        async function loadItems() {
+            try {
+                const response = await fetch('/items');
+                const items = await response.json();
+                
+                const itemsList = document.getElementById('itemsList');
+                if (items.length === 0) {
+                    itemsList.innerHTML = '<p>No items yet. Add some items above!</p>';
+                } else {
+                    itemsList.innerHTML = items.map((item, index) => `
+                        <div class="item">
+                            <strong>${item.name}</strong> - $${item.price}
+                            ${item.description ? `<br><em>${item.description}</em>` : ''}
+                        </div>
+                    `).join('');
+                }
+            } catch (error) {
+                document.getElementById('itemsList').innerHTML = '<p>Error loading items</p>';
+            }
+        }
+        
+        // Load items on page load
+        loadItems();
+    </script>
+</body>
+</html>
