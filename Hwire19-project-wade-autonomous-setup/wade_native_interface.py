@@ -1392,6 +1392,23 @@ async def serve_native_interface():
             color: #d4d4d4;
         }
         
+        /* Loading spinner */
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: #fff;
+            animation: spin 1s ease-in-out infinite;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
         .container {
             display: grid;
             grid-template-columns: 350px 1fr;
@@ -2431,7 +2448,7 @@ async def serve_native_interface():
                         <h3>Intel Query</h3>
                         <div class="search-form">
                             <textarea id="intelQuery" placeholder="Enter your search query..."></textarea>
-                            <button class="btn-primary" onclick="executeIntelQuery()">🔍 Search</button>
+                            <button id="searchButton" class="btn-primary" onclick="executeIntelQuery()">🔍 Search</button>
                         </div>
                     </div>
 
@@ -2655,6 +2672,25 @@ async def serve_native_interface():
         let tasks = [];
         let currentExecutionMode = 'simulation';
         let currentTab = 'chat';
+        
+        // Loading state management
+        function setLoading(elementId, isLoading) {
+            const element = document.getElementById(elementId);
+            if (!element) return;
+            
+            if (isLoading) {
+                element.disabled = true;
+                if (!element.getAttribute('data-original-text')) {
+                    element.setAttribute('data-original-text', element.innerHTML);
+                }
+                element.innerHTML = '<span class="spinner"></span> Processing...';
+            } else {
+                element.disabled = false;
+                // Restore original text from data-original-text attribute
+                const originalText = element.getAttribute('data-original-text') || 'Submit';
+                element.innerHTML = originalText;
+            }
+        }
         
         // Tab Management
         function switchTab(tabName) {
@@ -3442,12 +3478,15 @@ async def serve_native_interface():
             const query = document.getElementById('intelQuery').value;
             const searchType = document.getElementById('searchType').value;
             const anonymityLevel = document.getElementById('anonymityLevel').value;
+            const searchButton = document.getElementById('searchButton');
             
             if (!query) {
                 alert("Please enter a search query");
                 return;
             }
             
+            // Set loading state
+            setLoading('searchButton', true);
             document.getElementById('intelResults').innerHTML = '<div class="loading">Searching...</div>';
             
             fetch('/api/intel-query', {
@@ -3467,10 +3506,14 @@ async def serve_native_interface():
                     document.getElementById('intelResults').innerHTML = 
                         '<div class="empty-state">No results found</div>';
                 }
+                // Reset loading state
+                setLoading('searchButton', false);
             })
             .catch(error => {
                 document.getElementById('intelResults').innerHTML = 
                     `<div class="error-state">Error: ${error.message}</div>`;
+                // Reset loading state
+                setLoading('searchButton', false);
             });
         }
         
